@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+<title>Cue Web Output</title>
+<style>
+  :root {
+    --bg: #0e1014; --panel: #161a20; --raised: #1d222a; --line: #2a313b;
+    --text: #e6e9ee; --muted: #8b94a3; --blue: #3b8cff; --red: #ff4d4f; --green: #2fd17a;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 "Segoe UI", system-ui, sans-serif; }
+  main { padding: 20px; display: flex; flex-direction: column; gap: 18px; }
+  header { display: flex; align-items: center; gap: 10px; }
+  header h1 { font-size: 15px; font-weight: 600; margin: 0; flex: 1; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+  .dot.live { background: var(--green); } .dot.err { background: var(--red); }
+  #status { color: var(--muted); font-variant-numeric: tabular-nums; }
+  label.field { display: flex; flex-direction: column; gap: 6px; }
+  .lbl { color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+  input[type=text], select {
+    background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 10px; font: inherit; width: 100%;
+  }
+  input[type=text]:focus, select:focus { outline: none; border-color: var(--blue); }
+  .seg { display: flex; gap: 6px; }
+  .seg button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .sw { width: 10px; height: 10px; border-radius: 2px; border: 1px solid #fff3; }
+  button {
+    background: var(--raised); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+    padding: 9px 12px; font: inherit; cursor: pointer;
+  }
+  button:hover { border-color: #3a4350; }
+  button.on { border-color: var(--blue); color: #fff; }
+  .actions { display: flex; gap: 8px; }
+  #go { flex: 1; background: var(--green); color: #04150b; border-color: var(--green); font-weight: 600; }
+  #go.update { background: var(--blue); border-color: var(--blue); color: #fff; }
+  #stop { background: transparent; border-color: var(--red); color: var(--red); }
+  button:disabled { opacity: .4; cursor: default; }
+  .checks { display: flex; flex-direction: column; gap: 8px; color: var(--muted); }
+  .checks label { display: flex; gap: 8px; align-items: center; cursor: pointer; }
+  #error { color: var(--red); min-height: 1.4em; }
+  .hint { color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <span class="dot" id="dot"></span>
+    <h1>Web Output</h1>
+    <span id="status">Off</span>
+  </header>
+
+  <label class="field">
+    <span class="lbl">URL</span>
+    <input type="text" id="url" placeholder="https://app.overlays.uno/output/…" spellcheck="false" />
+  </label>
+
+  <label class="field">
+    <span class="lbl">Display</span>
+    <select id="display"></select>
+  </label>
+
+  <div class="field">
+    <span class="lbl">Background</span>
+    <div class="seg" id="bg">
+      <button data-bg="green"><span class="sw" style="background:#00FF00"></span>Green</button>
+      <button data-bg="blue"><span class="sw" style="background:#0000FF"></span>Blue</button>
+      <button data-bg="black"><span class="sw" style="background:#000"></span>Black</button>
+      <button data-bg="page">Page</button>
+    </div>
+  </div>
+
+  <div class="checks">
+    <label><input type="checkbox" id="muted" /> Mute page audio</label>
+    <label><input type="checkbox" id="login" /> Start when Windows starts (output reopens if it was live)</label>
+  </div>
+
+  <div class="actions">
+    <button id="go">Go Live</button>
+    <button id="reload" disabled>Reload</button>
+    <button id="stop" disabled>Stop</button>
+  </div>
+  <div id="error"></div>
+
+  <div class="hint">Press Esc on the output screen to take it down. Key colours only show where the page is transparent; "Page" keeps the page's own background.</div>
+</main>
+<script src="control.js"></script>
+</body>
+</html>

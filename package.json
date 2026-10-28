@@ -1,0 +1,29 @@
+{
+  "name": "cue-web-output",
+  "productName": "Cue Web Output",
+  "version": "1.0.0",
+  "description": "Put a web page (overlay output URL) fullscreen on a chosen monitor, over a key colour.",
+  "main": "src/main.js",
+  "author": "William Eze",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "42.4.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "uk.co.campustv.cueweboutput",
+    "productName": "Cue Web Output",
+    "files": ["src/**/*", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }] },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Cue-Web-Output-Setup-${version}.exe"
+    }
+  }
+}
