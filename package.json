@@ -1,7 +1,7 @@
 {
   "name": "cue-web-output",
   "productName": "Cue Web Output",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Put a web page (overlay output URL) fullscreen on a chosen monitor, over a key colour.",
   "main": "src/main.js",
   "author": "William Eze",

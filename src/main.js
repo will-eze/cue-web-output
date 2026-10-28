@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, screen, session } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, session, webFrameMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { BG, applyBackground, paintFrame } = require('./background');
 
 // ── Cue Web Output (standalone) ───────────────────────────────────────────────
 // Puts an external web page (e.g. a UNO / H2R / Singular overlay output URL, or
@@ -13,7 +14,6 @@ const fs = require('fs');
 // http(s)-only navigation.
 
 const PARTITION = 'persist:web-output';
-const BG = { green: '#00FF00', blue: '#0000FF', black: '#000000' };
 
 if (!app.requestSingleInstanceLock()) app.quit();
 
@@ -86,21 +86,6 @@ function getSession() {
     ses.setPermissionCheckHandler(() => false);
   }
   return ses;
-}
-
-// The key colour only shows where the page itself is transparent; overlay output
-// pages are, but force html/body transparent so a page default can't hide it.
-function applyBackground(w, bg) {
-  if (!w || w.isDestroyed()) return;
-  if (w._bgCssKey) { w.webContents.removeInsertedCSS(w._bgCssKey).catch(() => {}); w._bgCssKey = null; }
-  const color = BG[bg];
-  w.setBackgroundColor(color || '#000000');
-  if (color) {
-    w.webContents
-      .insertCSS('html, body { background: transparent !important; background-color: transparent !important; }')
-      .then((key) => { if (!w.isDestroyed()) w._bgCssKey = key; })
-      .catch(() => {});
-  }
 }
 
 function clearRetry() { if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; } }
@@ -178,6 +163,14 @@ function start({ url, displayBounds, bg } = {}) {
     if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); stop(); }
   });
   w.webContents.on('did-start-loading', () => { if (win === w) emit({ loading: true }); });
+  // Key colour as soon as the page's DOM exists (not only once every image and
+  // script has loaded), and again for each iframe that loads after (background.js).
+  w.webContents.on('dom-ready', () => { if (win === w) applyBackground(w, settings.bg); });
+  w.webContents.on('did-frame-finish-load', (_e, isMainFrame, processId, routingId) => {
+    if (win !== w || isMainFrame) return;
+    const f = webFrameMain.fromId(processId, routingId);
+    if (f) paintFrame(f, settings.bg);
+  });
   w.webContents.on('did-finish-load', () => {
     if (win !== w) return;
     clearRetry();
