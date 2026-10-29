@@ -13,7 +13,7 @@ Download `Cue-Web-Output-Setup-<version>.exe` from [Releases](../../releases/lat
 3. Pick the background: green, blue or black key colour (shows through wherever the page is transparent), or **Page** to keep the page's own background.
 4. Click **Go Live**.
 
-The output is frameless, always on top and fullscreen. It retries every 3 seconds if the page fails to load or crashes, reopens if the monitor is unplugged and reconnected, and comes back on launch if it was live when the app last closed. Tick **Start when Windows starts** for a dedicated screen machine. Press **Esc** on the output (or **Stop** in the app) to take it down.
+The output is frameless, always on top and fullscreen. It retries every 3 seconds if the page fails to load or crashes, follows the monitor by its name (so it reopens on the right screen when that monitor is unplugged and reconnected, even if Windows gives it a new ID or position), and comes back on launch if it was live when the app last closed. Tick **Start when Windows starts** for a dedicated screen machine. Press **Esc** on the output (or **Stop** in the app) to take it down.
 
 ## Build
 

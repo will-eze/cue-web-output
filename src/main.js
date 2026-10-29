@@ -19,9 +19,18 @@ if (!app.requestSingleInstanceLock()) app.quit();
 
 // ── Settings (JSON in userData) ───────────────────────────────────────────────
 const settingsFile = () => path.join(app.getPath('userData'), 'settings.json');
-let settings = { url: '', displayBounds: null, bg: 'green', active: false, muted: true };
+// `display` is the chosen monitor as { label, bounds }. It is matched by label (the
+// monitor's own name, e.g. "DELL P2419H" / "ATEM Mini") because Windows hands out new
+// display ids, and often new positions, when a monitor is unplugged and plugged back in.
+// Bounds are only a tie-break between identical monitors and a fallback when a
+// display reports no name.
+let settings = { url: '', display: null, bg: 'green', active: false, muted: true };
 function loadSettings() {
   try { settings = { ...settings, ...JSON.parse(fs.readFileSync(settingsFile(), 'utf8')) }; } catch {}
+  // 1.0.x saved bounds only. Keep them as the fallback; the label is filled in the
+  // next time the output opens on that display.
+  if (!settings.display && settings.displayBounds) settings.display = { label: null, bounds: settings.displayBounds };
+  delete settings.displayBounds;
 }
 function saveSettings(patch) {
   settings = { ...settings, ...patch };
@@ -36,7 +45,8 @@ let status = { live: false, loading: false, error: null };
 function getState() {
   return {
     url: settings.url,
-    displayBounds: settings.displayBounds,
+    displayId: findDisplay(settings.display)?.id ?? null,
+    displayLabel: settings.display?.label || null,
     bg: settings.bg,
     muted: settings.muted,
     openAtLogin: app.getLoginItemSettings().openAtLogin,
@@ -70,11 +80,32 @@ function listDisplays() {
   }));
 }
 
-function findDisplay(bounds) {
-  if (!bounds) return null;
-  return screen.getAllDisplays().find((d) =>
-    d.bounds.x === bounds.x && d.bounds.y === bounds.y &&
-    d.bounds.width === bounds.width && d.bounds.height === bounds.height) || null;
+const sameBounds = (a, b) => !!a && !!b &&
+  a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+
+function describeDisplay(d) {
+  return { label: d.label || null, bounds: { ...d.bounds } };
+}
+
+// Resolve the saved display against what is connected now: by label first, then
+// (several monitors with the same name) exact bounds, same resolution, nearest
+// position. Without a label, exact bounds only.
+function findDisplay(target) {
+  if (!target) return null;
+  const all = screen.getAllDisplays();
+  const b = target.bounds;
+  const named = target.label ? all.filter((d) => d.label === target.label) : [];
+  if (named.length === 1) return named[0];
+  if (named.length > 1) {
+    if (!b) return named[0];
+    const exact = named.find((d) => sameBounds(d.bounds, b));
+    if (exact) return exact;
+    const sized = named.filter((d) => d.bounds.width === b.width && d.bounds.height === b.height);
+    const pool = sized.length ? sized : named;
+    const dist = (d) => Math.hypot(d.bounds.x - b.x, d.bounds.y - b.y);
+    return pool.reduce((best, d) => (dist(d) < dist(best) ? d : best));
+  }
+  return all.find((d) => sameBounds(d.bounds, b)) || null;
 }
 
 let sessionReady = false;
@@ -106,6 +137,8 @@ function enforceFullScreen(w, tries = 8) {
   if (tries > 0) setTimeout(() => enforceFullScreen(w, tries - 1), 200);
 }
 
+const waitingMessage = () => `Waiting for ${settings.display?.label || 'the display'} to reconnect…`;
+
 function closeWindow() {
   clearRetry();
   const w = win;
@@ -113,27 +146,29 @@ function closeWindow() {
   if (w && !w.isDestroyed()) w.close();
 }
 
-function start({ url, displayBounds, bg } = {}) {
+function start({ url, display, bg } = {}) {
   if (url !== undefined) {
     const norm = normalizeUrl(url);
     if (!norm) return { ok: false, error: 'Enter a valid http(s) URL.' };
     saveSettings({ url: norm });
   }
-  if (displayBounds !== undefined) saveSettings({ displayBounds: displayBounds || null });
+  if (display !== undefined) saveSettings({ display: display || null });
   if (bg !== undefined) saveSettings({ bg: (BG[bg] || bg === 'page') ? bg : 'green' });
 
   if (!settings.url) return { ok: false, error: 'Enter a URL first.' };
-  const display = findDisplay(settings.displayBounds);
-  if (!display) return { ok: false, error: 'Choose a connected display.' };
+  const target = findDisplay(settings.display);
+  if (!target) return { ok: false, error: 'Choose a connected display.' };
 
   closeWindow();
-  saveSettings({ active: true });
+  // Refresh the stored label + bounds from the live display (fills in the label for
+  // settings saved by 1.0.x, and keeps the tie-break bounds current).
+  saveSettings({ active: true, display: describeDisplay(target) });
 
   const w = new BrowserWindow({
-    x: display.bounds.x,
-    y: display.bounds.y,
-    width: display.bounds.width,
-    height: display.bounds.height,
+    x: target.bounds.x,
+    y: target.bounds.y,
+    width: target.bounds.width,
+    height: target.bounds.height,
     fullscreen: true,
     frame: false,
     alwaysOnTop: true,
@@ -205,13 +240,13 @@ function stop() {
   return { ok: true };
 }
 
-function configure({ url, displayBounds, bg, muted, openAtLogin } = {}) {
+function configure({ url, display, bg, muted, openAtLogin } = {}) {
   if (url !== undefined) {
     const norm = url ? normalizeUrl(url) : '';
     if (url && !norm) return { ok: false, error: 'Enter a valid http(s) URL.' };
     saveSettings({ url: norm });
   }
-  if (displayBounds !== undefined) saveSettings({ displayBounds: displayBounds || null });
+  if (display !== undefined) saveSettings({ display: display || null });
   if (bg !== undefined) {
     saveSettings({ bg: (BG[bg] || bg === 'page') ? bg : 'green' });
     applyBackground(win, settings.bg);
@@ -261,19 +296,42 @@ app.whenReady().then(() => {
   createControl();
 
   // Re-open on launch if it was live when last quit.
+  // If its display isn't plugged in yet, wait for it (handled below) instead of failing.
   if (settings.active) {
     const r = start();
-    if (!r.ok) emit({ live: false, error: r.error });
+    if (!r.ok && settings.url && settings.display) emit({ live: true, error: waitingMessage() });
+    else if (!r.ok) emit({ live: false, error: r.error });
   }
 
-  // A monitor dropping out and coming back (cable, sleep) re-opens the output on it.
+  // A monitor dropping out and coming back (cable, sleep, ATEM power cycle):
+  // - gone: take the output down (but stay `active`) rather than let Windows shove
+  //   the fullscreen window onto another screen, usually the operator's;
+  // - back (new id, maybe a new position): re-open on it, found again by label;
+  // - moved while live: re-open where the display now is.
+  // Windows fires several events while it rebuilds the layout, so settle first.
+  let displayTimer = null;
   const onDisplaysChanged = () => {
-    if (settings.active && !win && findDisplay(settings.displayBounds)) start();
-    emit({});
+    clearTimeout(displayTimer);
+    displayTimer = setTimeout(() => {
+      displayTimer = null;
+      if (!settings.active) return emit({});
+      const target = findDisplay(settings.display);
+      if (!target) {
+        if (win) closeWindow();
+        return emit({ live: true, loading: false, error: waitingMessage() });
+      }
+      const onTarget = win && !win.isDestroyed() &&
+        screen.getDisplayMatching(win.getBounds()).id === target.id &&
+        sameBounds(settings.display?.bounds, target.bounds);
+      if (!onTarget) {
+        const r = start();
+        if (!r.ok) emit({ live: false, error: r.error });
+      } else emit({});
+    }, 750);
   };
   screen.on('display-added', onDisplaysChanged);
-  screen.on('display-removed', () => emit({}));
-  screen.on('display-metrics-changed', () => emit({}));
+  screen.on('display-removed', onDisplaysChanged);
+  screen.on('display-metrics-changed', onDisplaysChanged);
 });
 
 app.on('before-quit', () => {
