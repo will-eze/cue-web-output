@@ -137,6 +137,40 @@ function enforceFullScreen(w, tries = 8) {
   if (tries > 0) setTimeout(() => enforceFullScreen(w, tries - 1), 200);
 }
 
+// Keep the live window covering exactly its display, in place: same window, same
+// loaded page, no reload. Windows renumbers display coordinates whenever ANY monitor
+// is added or removed, and drags/resizes our window (out of fullscreen, under the
+// taskbar) while it does, so this runs on every display event and on a watchdog.
+// Never close + reopen the window for this; a reload shows the desktop for seconds.
+const near = (a, b) => Math.abs(a - b) <= 2; // DPI rounding between mixed-scale screens
+const fitted = (r, b) => near(r.x, b.x) && near(r.y, b.y) && near(r.width, b.width) && near(r.height, b.height);
+
+let refitting = false; // our own setFullScreen(false) must not trip the leave-full-screen re-assert
+
+function fitToDisplay(w, d) {
+  if (!w || w.isDestroyed() || !d) return;
+  w.setAlwaysOnTop(true, 'screen-saver'); // above the taskbar, re-asserted after a re-layout
+  if (w.isFullScreen() && fitted(w.getBounds(), d.bounds)) return;
+  // Leave fullscreen, move onto the display's new rect, enter fullscreen there.
+  refitting = true;
+  try {
+    if (w.isFullScreen()) w.setFullScreen(false);
+    w.setBounds(d.bounds);
+    w.setFullScreen(true);
+  } finally { refitting = false; }
+  enforceFullScreen(w);
+}
+
+let watchdog = null;
+function startWatchdog() {
+  if (watchdog) return;
+  watchdog = setInterval(() => {
+    if (!win || win.isDestroyed()) return;
+    const target = findDisplay(settings.display);
+    if (target) fitToDisplay(win, target);
+  }, 2000);
+}
+
 const waitingMessage = () => `Waiting for ${settings.display?.label || 'the display'} to reconnect…`;
 
 function closeWindow() {
@@ -223,7 +257,8 @@ function start({ url, display, bg } = {}) {
     emit({ error: 'Page crashed — reloading…' });
     scheduleRetry();
   });
-  w.on('leave-full-screen', () => { if (!w.isDestroyed()) w.setFullScreen(true); });
+  w.setAlwaysOnTop(true, 'screen-saver');
+  w.on('leave-full-screen', () => { if (!refitting && !w.isDestroyed()) w.setFullScreen(true); });
   w.on('closed', () => {
     if (win === w) { win = null; clearRetry(); saveSettings({ active: false }); emit({ live: false, loading: false }); }
   });
@@ -304,13 +339,18 @@ app.whenReady().then(() => {
   }
 
   // A monitor dropping out and coming back (cable, sleep, ATEM power cycle):
-  // - gone: take the output down (but stay `active`) rather than let Windows shove
-  //   the fullscreen window onto another screen, usually the operator's;
-  // - back (new id, maybe a new position): re-open on it, found again by label;
-  // - moved while live: re-open where the display now is.
-  // Windows fires several events while it rebuilds the layout, so settle first.
+  // - output's display gone: take the output down (but stay `active`) rather than
+  //   let Windows shove it onto another screen, usually the operator's;
+  // - output's display back (new id, maybe a new position): re-open on it, by label;
+  // - any OTHER monitor added/removed: the output's display keeps its window, which
+  //   is just re-fitted in place (fitToDisplay), immediately and again once settled.
+  // Opening/closing waits for Windows to finish its burst of events.
   let displayTimer = null;
   const onDisplaysChanged = () => {
+    if (win && !win.isDestroyed()) {
+      const now = findDisplay(settings.display);
+      if (now) fitToDisplay(win, now);
+    }
     clearTimeout(displayTimer);
     displayTimer = setTimeout(() => {
       displayTimer = null;
@@ -320,18 +360,20 @@ app.whenReady().then(() => {
         if (win) closeWindow();
         return emit({ live: true, loading: false, error: waitingMessage() });
       }
-      const onTarget = win && !win.isDestroyed() &&
-        screen.getDisplayMatching(win.getBounds()).id === target.id &&
-        sameBounds(settings.display?.bounds, target.bounds);
-      if (!onTarget) {
+      if (!win || win.isDestroyed()) {
         const r = start();
         if (!r.ok) emit({ live: false, error: r.error });
-      } else emit({});
+        return;
+      }
+      fitToDisplay(win, target);
+      saveSettings({ display: describeDisplay(target) }); // keep tie-break bounds current
+      emit({});
     }, 750);
   };
   screen.on('display-added', onDisplaysChanged);
   screen.on('display-removed', onDisplaysChanged);
   screen.on('display-metrics-changed', onDisplaysChanged);
+  startWatchdog();
 });
 
 app.on('before-quit', () => {
